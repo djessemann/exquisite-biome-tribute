@@ -205,12 +205,6 @@ Exquisite Biome is a game about the natural world, the creatures that inhabit it
 
 During play, you will generate an ecosystem and use prompts and questions to create and discover the creatures that live there. In the physical game you play it with a standard 52-card deck and a journal; here the app deals the cards and keeps the journal.
 
-SAFETY & COMFORT
-
-Exquisite Biome draws inspiration from nature and the natural world. If there are topics or themes that you do not want to explore in your game, keep them in mind as lines and veils. Lines are subjects that you don't want to include in your game; veils are subjects that you might include, but not in vivid detail.
-
-Some of the prompts in this game delve into territory that you might have included in your lines or veils. You may always read the prompts before answering them, and curate your play experience. If you encounter a prompt you do not want to use, you can change it, sidestep it, or draw a different card instead. Player safety and enjoyment is always more important than following the game rules.
-
 HOW A GAME GOES
 
 Two biome cards frame the environment. Three creature cards are then laid in a row: the first describes the creature, the second gives it a distinctive feature, the third sets its habits and personality. After answering the prompts, you play out a brief scene and name the species.
