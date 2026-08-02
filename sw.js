@@ -2,7 +2,7 @@
    The app shell is precached, so after the first visit the app works fully
    offline. Bump VERSION whenever a shell asset changes, or clients keep
    serving the old cached copy. */
-const VERSION = 'eb-v8';
+const VERSION = 'eb-v9';
 const SHELL = [
   './',
   './index.html',

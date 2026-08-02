@@ -770,6 +770,28 @@ function Prompt({
     className: "label"
   }, label), /*#__PURE__*/React.createElement("div", null, text));
 }
+
+/* Line-drawn house, same weight as the rest of the wireframe. Sized in the
+   markup so it scales with the chrome button rather than the font. */
+function HomeIcon() {
+  return /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 24 24",
+    width: "21",
+    height: "21",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "1.8",
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    "aria-hidden": "true"
+  }, /*#__PURE__*/React.createElement("path", {
+    d: "M3 10.5 12 3l9 7.5"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M5.5 9.2V20h13V9.2"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M9.8 20v-5.6h4.4V20"
+  }));
+}
 function Chrome({
   onHome,
   onHelp
@@ -781,7 +803,7 @@ function Chrome({
     className: "chrome",
     "aria-label": "Home",
     onClick: onHome
-  }, "Home") : /*#__PURE__*/React.createElement("span", {
+  }, /*#__PURE__*/React.createElement(HomeIcon, null)) : /*#__PURE__*/React.createElement("span", {
     className: "chrome-spacer",
     "aria-hidden": "true"
   }), onHelp ? /*#__PURE__*/React.createElement("button", {

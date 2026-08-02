@@ -666,12 +666,25 @@ function Prompt({ label, text }){
   );
 }
 
+/* Line-drawn house, same weight as the rest of the wireframe. Sized in the
+   markup so it scales with the chrome button rather than the font. */
+function HomeIcon(){
+  return (
+    <svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor"
+      strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 10.5 12 3l9 7.5" />
+      <path d="M5.5 9.2V20h13V9.2" />
+      <path d="M9.8 20v-5.6h4.4V20" />
+    </svg>
+  );
+}
+
 function Chrome({ onHome, onHelp }){
   // Both slots always render so space-between keeps Home left / Help right.
   return (
     <div className="chrome-bar">
       {onHome
-        ? <button className="chrome" aria-label="Home" onClick={onHome}>Home</button>
+        ? <button className="chrome" aria-label="Home" onClick={onHome}><HomeIcon /></button>
         : <span className="chrome-spacer" aria-hidden="true" />}
       {onHelp
         ? <button className="chrome" aria-label="Rules" onClick={onHelp}>?</button>
