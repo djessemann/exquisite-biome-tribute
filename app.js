@@ -1460,9 +1460,7 @@ function App() {
     }, /*#__PURE__*/React.createElement(Card, {
       card: target.promptCard,
       variant: "sm"
-    }), /*#__PURE__*/React.createElement("span", null, SCENE_RANK[target.promptCard.rank]))), /*#__PURE__*/React.createElement("div", {
-      className: "meta"
-    }, "Tap to use or leave this prompt."), /*#__PURE__*/React.createElement("button", {
+    }), /*#__PURE__*/React.createElement("span", null, SCENE_RANK[target.promptCard.rank]))), /*#__PURE__*/React.createElement("button", {
       className: "btn small",
       style: {
         marginTop: '10px'

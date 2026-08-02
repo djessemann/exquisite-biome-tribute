@@ -1189,7 +1189,6 @@ function App(){
                     <span>{SCENE_RANK[target.promptCard.rank]}</span>
                   </span>
                 </button>
-                <div className="meta">Tap to use or leave this prompt.</div>
                 <button className="btn small" style={{marginTop:'10px'}} onClick={drawScenePrompt}>
                   Draw a different card
                 </button>
