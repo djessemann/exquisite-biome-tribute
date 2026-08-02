@@ -458,10 +458,16 @@ function loadArchive() {
     return [];
   }
 }
+/* Returns false when the write fails — with four full-resolution drawings a
+   journal is no longer small, so a quota error has to be visible rather than
+   silently dropping the expedition the player just finished. */
 function saveArchive(arr) {
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify(arr));
-  } catch (e) {}
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 /* An expedition runs long — three species, four scenes. Unlike a short
    planet-hop, losing it to a backgrounded tab would hurt, so the in-progress
@@ -633,7 +639,7 @@ function paintExport(ctx, rec, imgs, measureOnly) {
     }
     const sx = PAD + Math.round((CW - sw) / 2);
     if (draw) {
-      ctx.imageSmoothingEnabled = false;
+      ctx.imageSmoothingEnabled = true;
       ctx.drawImage(img, sx, y, sw, sh);
       ctx.strokeStyle = EXP.ink;
       ctx.lineWidth = 2;
@@ -960,12 +966,13 @@ function App() {
     };
     const next = [rec, ...archive];
     setArchive(next);
-    saveArchive(next);
+    const stored = saveArchive(next);
     persistSession(null);
     setSaved(null);
     setSession(null);
     setRoleKey(null);
     setDraft('');
+    setToast(stored ? null : "Out of storage — this journal won't survive a reload. Burn an older one, then share this from its page.");
     setScreen('archive');
   }
   function burnRecord(id) {
@@ -1830,13 +1837,25 @@ function App() {
 
 /* ============================================================
    SKETCH — optional drawing space, kept as its own component so the
-   canvas + tool state stay isolated from app re-renders. Strokes
-   rasterize onto a fixed 96-cell grid; the canvas upscales
-   nearest-neighbor via CSS and saves the tiny grid PNG.
+   canvas + tool state stay isolated from app re-renders.
+
+   The canvas has a fixed 16:9 backing store, so every saved drawing is
+   the same resolution whatever the device, and lands in the journal
+   without stretching it vertically. Strokes are antialiased paths, not
+   stamped cells.
+
+   Strokes are kept as normalized (0–1) point paths rather than bitmap
+   snapshots: undo re-renders from the list, which costs no memory per
+   step and stays resolution-independent. Live drawing appends one
+   segment at a time instead of repainting, so a long stroke doesn't
+   redraw the whole picture on every pointer move.
    ============================================================ */
+const SKETCH_W = 1024,
+  SKETCH_H = 576; // 16:9
 const SKETCH_PAPER = '#ffffff';
-const SKETCH_GRID = 96;
-const ERASER_CELLS = 7;
+const SKETCH_INK = '#000000';
+const PEN_W = 0.007; // stroke width as a fraction of canvas width
+const ERASER_W = 0.045;
 function SketchScreen({
   title,
   onDone,
@@ -1845,117 +1864,103 @@ function SketchScreen({
 }) {
   const canvasRef = useRef(null);
   const ctxRef = useRef(null);
-  const drawing = useRef(false);
-  const last = useRef({
-    x: 0,
-    y: 0
-  });
-  const history = useRef([]);
+  const strokes = useRef([]); // committed strokes
+  const active = useRef(null); // stroke in progress
   const toolRef = useRef('pen');
-  const dirtyRef = useRef(false);
   const [tool, setTool] = useState('pen');
-  const [canUndo, setCanUndo] = useState(false);
-  const [dirty, setDirty] = useState(false);
+  const [count, setCount] = useState(0); // committed stroke count
+
   useEffect(() => {
     toolRef.current = tool;
   }, [tool]);
   useEffect(() => {
     const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = SKETCH_GRID;
-    canvas.height = Math.max(1, Math.round(SKETCH_GRID * rect.height / rect.width));
+    canvas.width = SKETCH_W;
+    canvas.height = SKETCH_H;
     const ctx = canvas.getContext('2d');
-    ctx.fillStyle = SKETCH_PAPER;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
     ctxRef.current = ctx;
+    clear(ctx);
   }, []);
-  function cellAt(e) {
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
+  function clear(ctx) {
+    ctx.fillStyle = SKETCH_PAPER;
+    ctx.fillRect(0, 0, SKETCH_W, SKETCH_H);
+  }
+  function styleFor(ctx, t) {
+    ctx.strokeStyle = ctx.fillStyle = t === 'eraser' ? SKETCH_PAPER : SKETCH_INK;
+    ctx.lineWidth = SKETCH_W * (t === 'eraser' ? ERASER_W : PEN_W);
+  }
+  // a tap with no travel still leaves a mark
+  function dot(ctx, t, p) {
+    styleFor(ctx, t);
+    ctx.beginPath();
+    ctx.arc(p.x * SKETCH_W, p.y * SKETCH_H, ctx.lineWidth / 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  function segment(ctx, t, a, b) {
+    styleFor(ctx, t);
+    ctx.beginPath();
+    ctx.moveTo(a.x * SKETCH_W, a.y * SKETCH_H);
+    ctx.lineTo(b.x * SKETCH_W, b.y * SKETCH_H);
+    ctx.stroke();
+  }
+  function paintStroke(ctx, s) {
+    if (s.pts.length === 1) {
+      dot(ctx, s.tool, s.pts[0]);
+      return;
+    }
+    styleFor(ctx, s.tool);
+    ctx.beginPath();
+    ctx.moveTo(s.pts[0].x * SKETCH_W, s.pts[0].y * SKETCH_H);
+    for (let i = 1; i < s.pts.length; i++) ctx.lineTo(s.pts[i].x * SKETCH_W, s.pts[i].y * SKETCH_H);
+    ctx.stroke();
+  }
+  function repaint() {
+    const ctx = ctxRef.current;
+    clear(ctx);
+    for (const s of strokes.current) paintStroke(ctx, s);
+  }
+  function ptAt(e) {
+    const r = canvasRef.current.getBoundingClientRect();
     return {
-      x: Math.floor((e.clientX - rect.left) / rect.width * canvas.width),
-      y: Math.floor((e.clientY - rect.top) / rect.height * canvas.height)
+      x: (e.clientX - r.left) / r.width,
+      y: (e.clientY - r.top) / r.height
     };
-  }
-  function stamp(ctx, c) {
-    if (toolRef.current === 'eraser') {
-      const o = Math.floor(ERASER_CELLS / 2);
-      ctx.fillStyle = SKETCH_PAPER;
-      ctx.fillRect(c.x - o, c.y - o, ERASER_CELLS, ERASER_CELLS);
-    } else {
-      ctx.fillStyle = '#000';
-      ctx.fillRect(c.x, c.y, 1, 1);
-    }
-  }
-  // Bresenham between cells so fast strokes stay continuous
-  function stampLine(ctx, a, b) {
-    let x0 = a.x,
-      y0 = a.y;
-    const dx = Math.abs(b.x - x0),
-      dy = -Math.abs(b.y - y0);
-    const sx = x0 < b.x ? 1 : -1,
-      sy = y0 < b.y ? 1 : -1;
-    let err = dx + dy;
-    for (;;) {
-      stamp(ctx, {
-        x: x0,
-        y: y0
-      });
-      if (x0 === b.x && y0 === b.y) break;
-      const e2 = 2 * err;
-      if (e2 >= dy) {
-        err += dy;
-        x0 += sx;
-      }
-      if (e2 <= dx) {
-        err += dx;
-        y0 += sy;
-      }
-    }
   }
   function down(e) {
     e.preventDefault();
     canvasRef.current.setPointerCapture(e.pointerId);
-    history.current.push(canvasRef.current.toDataURL());
-    if (history.current.length > 40) history.current.shift();
-    setCanUndo(true);
-    if (!dirtyRef.current) {
-      dirtyRef.current = true;
-      setDirty(true);
-    }
-    drawing.current = true;
-    const c = cellAt(e);
-    last.current = c;
-    stamp(ctxRef.current, c);
+    const p = ptAt(e);
+    active.current = {
+      tool: toolRef.current,
+      pts: [p]
+    };
+    dot(ctxRef.current, active.current.tool, p);
   }
   function move(e) {
-    if (!drawing.current) return;
+    if (!active.current) return;
     e.preventDefault();
-    const c = cellAt(e);
-    if (c.x === last.current.x && c.y === last.current.y) return;
-    stampLine(ctxRef.current, last.current, c);
-    last.current = c;
+    const p = ptAt(e);
+    const pts = active.current.pts;
+    const last = pts[pts.length - 1];
+    // ignore sub-pixel jitter so the point list stays lean
+    if (Math.abs(p.x - last.x) * SKETCH_W < 1 && Math.abs(p.y - last.y) * SKETCH_H < 1) return;
+    segment(ctxRef.current, active.current.tool, last, p);
+    pts.push(p);
   }
   function up() {
-    drawing.current = false;
+    if (!active.current) return;
+    strokes.current.push(active.current);
+    active.current = null;
+    setCount(strokes.current.length);
   }
   function undo() {
-    const prev = history.current.pop();
-    setCanUndo(history.current.length > 0);
-    if (history.current.length === 0) {
-      dirtyRef.current = false;
-      setDirty(false);
-    }
-    if (!prev) return;
-    const img = new Image();
-    img.onload = () => {
-      const canvas = canvasRef.current,
-        ctx = ctxRef.current;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0);
-    };
-    img.src = prev;
+    strokes.current.pop();
+    setCount(strokes.current.length);
+    repaint();
   }
+  const dirty = count > 0;
   return /*#__PURE__*/React.createElement("div", {
     className: "screen with-chrome"
   }, /*#__PURE__*/React.createElement("div", {
@@ -1979,7 +1984,7 @@ function SketchScreen({
     onClick: () => setTool('eraser')
   }, "Eraser"), /*#__PURE__*/React.createElement("button", {
     className: "tool-btn",
-    disabled: !canUndo,
+    disabled: !dirty,
     onClick: undo
   }, "Undo"))), /*#__PURE__*/React.createElement("div", {
     className: "entry-actions"

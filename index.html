@@ -173,10 +173,12 @@
 
   /* ---------- sketch ---------- */
   .sketch-wrap{ flex:1; display:flex; flex-direction:column; gap:12px; min-height:0; }
-  .sketch-paper{ position:relative; width:100%; flex:1; min-height:220px; background:#fff;
+  /* 16:9 pad — matches the canvas backing store, so pointer coordinates map
+     without distortion and drawings sit wide in the journal rather than tall */
+  .sketch-paper{ position:relative; width:100%; aspect-ratio:16/9; flex:0 0 auto; background:#fff;
     border:1px solid #000; overflow:hidden; touch-action:none; }
   .sketch-paper canvas{ position:absolute; inset:0; width:100%; height:100%; display:block;
-    touch-action:none; cursor:crosshair; image-rendering:pixelated; image-rendering:crisp-edges; }
+    touch-action:none; cursor:crosshair; }
   .sketch-tools{ display:flex; justify-content:center; gap:10px; }
   .tool-btn{ border:1px solid #000; background:#fff; color:#000; border-radius:0; padding:8px 12px; font-size:12px; }
   .tool-btn.active{ background:#000; color:#fff; }
