@@ -515,9 +515,11 @@ function newCreature(base, i) {
       feature: false,
       habits: false
     },
+    // usePrompt: a drawn scene prompt can be taken or left, like the frames
     scene: {
       frame: '',
       promptCard: null,
+      usePrompt: false,
       body: ''
     },
     sketch: null // optional drawing of this creature
@@ -534,6 +536,7 @@ function newRound(biome, base) {
     finalScene: {
       frame: '',
       promptCard: null,
+      usePrompt: false,
       body: '',
       sketch: null
     }
@@ -919,6 +922,13 @@ function App() {
       s.deck = deck;
       const t = sceneTarget === 'final' ? r.finalScene : r.creatures[r.creatureIndex].scene;
       t.promptCard = cards[0];
+      t.usePrompt = true; // a card you just drew starts taken
+    });
+  }
+  function toggleScenePrompt() {
+    edit((s, r) => {
+      const t = sceneTarget === 'final' ? r.finalScene : r.creatures[r.creatureIndex].scene;
+      t.usePrompt = !t.usePrompt;
     });
   }
   // Every scene is followed by its drawing step; the drawing step decides
@@ -928,6 +938,8 @@ function App() {
     edit((s, r) => {
       const t = target === 'final' ? r.finalScene : r.creatures[r.creatureIndex].scene;
       t.body = draft;
+      // a drawn-but-left prompt isn't part of the scene, so it isn't recorded
+      if (!t.usePrompt) t.promptCard = null;
     });
     setDraft('');
     setScreen(target === 'final' ? 'finalSketch' : 'creatureSketch');
@@ -1437,12 +1449,26 @@ function App() {
       className: "box"
     }, /*#__PURE__*/React.createElement("div", {
       className: "label"
-    }, "Scene prompt (optional)"), target.promptCard ? /*#__PURE__*/React.createElement("div", {
-      className: "row"
+    }, "Scene prompt (optional)"), target.promptCard ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+      className: 'option' + (target.usePrompt ? ' on' : ''),
+      onClick: toggleScenePrompt
+    }, /*#__PURE__*/React.createElement("span", {
+      className: "row",
+      style: {
+        gap: '10px'
+      }
     }, /*#__PURE__*/React.createElement(Card, {
       card: target.promptCard,
       variant: "sm"
-    }), /*#__PURE__*/React.createElement("div", null, SCENE_RANK[target.promptCard.rank])) : /*#__PURE__*/React.createElement("p", {
+    }), /*#__PURE__*/React.createElement("span", null, SCENE_RANK[target.promptCard.rank]))), /*#__PURE__*/React.createElement("div", {
+      className: "meta"
+    }, "Tap to use or leave this prompt."), /*#__PURE__*/React.createElement("button", {
+      className: "btn small",
+      style: {
+        marginTop: '10px'
+      },
+      onClick: drawScenePrompt
+    }, "Draw a different card")) : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("p", {
       className: "meta"
     }, "If you need a scene prompt, draw one additional card and use the rank as extra inspiration. (Don\u2019t worry about the suit.)"), /*#__PURE__*/React.createElement("button", {
       className: "btn small",
@@ -1450,7 +1476,7 @@ function App() {
         marginTop: '10px'
       },
       onClick: drawScenePrompt
-    }, target.promptCard ? 'Draw a different card' : 'Draw a scene prompt')), /*#__PURE__*/React.createElement("div", {
+    }, "Draw a scene prompt"))), /*#__PURE__*/React.createElement("div", {
       className: "entry-actions"
     }, /*#__PURE__*/React.createElement("button", {
       className: "btn",
@@ -1478,7 +1504,7 @@ function App() {
       className: "label"
     }, isFinal ? 'All three species' : creature.name), /*#__PURE__*/React.createElement("div", {
       className: "meta"
-    }, target.frame), target.promptCard && /*#__PURE__*/React.createElement("div", {
+    }, target.frame), target.promptCard && target.usePrompt && /*#__PURE__*/React.createElement("div", {
       className: "meta",
       style: {
         marginTop: '6px'

@@ -461,7 +461,8 @@ function newCreature(base, i){
     cards: rotate(base, i),
     entries: { desc:'', feature:'', habits:'' },
     done:    { desc:false, feature:false, habits:false },
-    scene:   { frame:'', promptCard:null, body:'' },
+    // usePrompt: a drawn scene prompt can be taken or left, like the frames
+    scene:   { frame:'', promptCard:null, usePrompt:false, body:'' },
     sketch:  null,               // optional drawing of this creature
   };
 }
@@ -471,7 +472,7 @@ function newRound(biome, base){
     base,                        // the three creature cards, in dealt order
     creatures: [newCreature(base, 0)],
     creatureIndex: 0,
-    finalScene: { frame:'', promptCard:null, body:'', sketch:null },
+    finalScene: { frame:'', promptCard:null, usePrompt:false, body:'', sketch:null },
   };
 }
 
@@ -799,6 +800,13 @@ function App(){
       s.deck = deck;
       const t = sceneTarget === 'final' ? r.finalScene : r.creatures[r.creatureIndex].scene;
       t.promptCard = cards[0];
+      t.usePrompt = true;            // a card you just drew starts taken
+    });
+  }
+  function toggleScenePrompt(){
+    edit((s, r) => {
+      const t = sceneTarget === 'final' ? r.finalScene : r.creatures[r.creatureIndex].scene;
+      t.usePrompt = !t.usePrompt;
     });
   }
   // Every scene is followed by its drawing step; the drawing step decides
@@ -808,6 +816,8 @@ function App(){
     edit((s, r) => {
       const t = target === 'final' ? r.finalScene : r.creatures[r.creatureIndex].scene;
       t.body = draft;
+      // a drawn-but-left prompt isn't part of the scene, so it isn't recorded
+      if(!t.usePrompt) t.promptCard = null;
     });
     setDraft('');
     setScreen(target === 'final' ? 'finalSketch' : 'creatureSketch');
@@ -1171,15 +1181,26 @@ function App(){
         <div className="box">
           <div className="label">Scene prompt (optional)</div>
           {target.promptCard
-            ? <div className="row">
-                <Card card={target.promptCard} variant="sm" />
-                <div>{SCENE_RANK[target.promptCard.rank]}</div>
-              </div>
-            : <p className="meta">If you need a scene prompt, draw one additional card and use the
-                rank as extra inspiration. (Don&rsquo;t worry about the suit.)</p>}
-          <button className="btn small" style={{marginTop:'10px'}} onClick={drawScenePrompt}>
-            {target.promptCard ? 'Draw a different card' : 'Draw a scene prompt'}
-          </button>
+            ? <>
+                <button className={'option' + (target.usePrompt ? ' on' : '')}
+                  onClick={toggleScenePrompt}>
+                  <span className="row" style={{gap:'10px'}}>
+                    <Card card={target.promptCard} variant="sm" />
+                    <span>{SCENE_RANK[target.promptCard.rank]}</span>
+                  </span>
+                </button>
+                <div className="meta">Tap to use or leave this prompt.</div>
+                <button className="btn small" style={{marginTop:'10px'}} onClick={drawScenePrompt}>
+                  Draw a different card
+                </button>
+              </>
+            : <>
+                <p className="meta">If you need a scene prompt, draw one additional card and use the
+                  rank as extra inspiration. (Don&rsquo;t worry about the suit.)</p>
+                <button className="btn small" style={{marginTop:'10px'}} onClick={drawScenePrompt}>
+                  Draw a scene prompt
+                </button>
+              </>}
         </div>
         <div className="entry-actions">
           <button className="btn" onClick={() =>
@@ -1201,7 +1222,7 @@ function App(){
         <div className="entry-head">
           <div className="label">{isFinal ? 'All three species' : creature.name}</div>
           <div className="meta">{target.frame}</div>
-          {target.promptCard &&
+          {target.promptCard && target.usePrompt &&
             <div className="meta" style={{marginTop:'6px'}}>
               Scene prompt: {SCENE_RANK[target.promptCard.rank]} ({cardText(target.promptCard)})
             </div>}
