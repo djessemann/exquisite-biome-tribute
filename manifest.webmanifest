@@ -1,0 +1,14 @@
+{
+  "name": "Exquisite Biome",
+  "short_name": "Biome",
+  "description": "A game of speculative biology, by Caro Asercion.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [
+    { "src": "icons/icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
