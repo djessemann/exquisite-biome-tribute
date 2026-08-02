@@ -2,7 +2,7 @@
    The app shell is precached, so after the first visit the app works fully
    offline. Bump VERSION whenever a shell asset changes, or clients keep
    serving the old cached copy. */
-const VERSION = 'eb-v7';
+const VERSION = 'eb-v8';
 const SHELL = [
   './',
   './index.html',
@@ -11,6 +11,7 @@ const SHELL = [
   './vendor/react-dom.production.min.js',
   './manifest.webmanifest',
   './icons/icon.png',
+  './icons/icon.svg',
 ];
 
 self.addEventListener('install', (event) => {
