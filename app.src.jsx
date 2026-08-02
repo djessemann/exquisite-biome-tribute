@@ -191,7 +191,7 @@ During play, you will generate an ecosystem and use prompts and questions to cre
 
 SAFETY & COMFORT
 
-Exquisite Biome draws inspiration from nature and the natural world. If there are topics or themes that you do not want to explore in your game, note them as lines and veils. Lines are subjects that you don't want to include in your game; veils are subjects that you might include, but agree not to discuss in vivid detail. You can always update these lists throughout the game.
+Exquisite Biome draws inspiration from nature and the natural world. If there are topics or themes that you do not want to explore in your game, keep them in mind as lines and veils. Lines are subjects that you don't want to include in your game; veils are subjects that you might include, but not in vivid detail.
 
 Some of the prompts in this game delve into territory that you might have included in your lines or veils. You may always read the prompts before answering them, and curate your play experience. If you encounter a prompt you do not want to use, you can change it, sidestep it, or draw a different card instead. Player safety and enjoyment is always more important than following the game rules.
 
@@ -542,11 +542,6 @@ function paintExport(ctx, rec, sketchImg, measureOnly){
   line();
   y += 26;
 
-  if(rec.realism)    { text('LEVEL OF REALISM', 'bold 16px Arial, Helvetica, sans-serif', 4, 20);
-                       text(rec.realism, '20px Arial, Helvetica, sans-serif', 20, 28); }
-  if(rec.linesVeils) { text('LINES AND VEILS', 'bold 16px Arial, Helvetica, sans-serif', 4, 20);
-                       text(rec.linesVeils, '20px Arial, Helvetica, sans-serif', 20, 28); }
-
   rec.rounds.forEach((r, ri) => {
     line(); y += 26;
     text(ri === 0 ? 'THE LAY OF THE LAND' : 'THE LAY OF THE LAND — CONTINUED',
@@ -705,15 +700,14 @@ function App(){
     setSession({
       id: 'e' + Date.now() + Math.floor(Math.random()*1000),
       createdAt: Date.now(),
-      realism: '', linesVeils: '',
       deck: shuffle(buildDeck()),
       rounds: [], sketch: null,
     });
-    setScreen('setup');
+    setScreen('biomeDraw');
   }
   function resume(){
     setSession(saved);
-    setScreen(saved && saved.rounds.length ? 'creatureRow' : 'setup');
+    setScreen(saved && saved.rounds.length ? 'creatureRow' : 'biomeDraw');
   }
 
   function drawBiome(){
@@ -831,8 +825,6 @@ function App(){
       id: session.id,
       name: (session.rounds[0].biome.name || 'Unnamed biome').trim(),
       createdAt: session.createdAt,
-      realism: session.realism,
-      linesVeils: session.linesVeils,
       rounds: session.rounds,
       sketch: sketch || session.sketch || null,
     };
@@ -936,39 +928,6 @@ function App(){
           </div>
         </div>
         <Chrome onHelp={help} />
-      </div>
-    );
-  }
-
-  function Setup(){
-    return (
-      <div className="screen with-chrome">
-        <h2>Preparing to Play</h2>
-        <p>Before you begin, decide the level of realism you wish to explore. You may create a
-          science fiction or fantasy setting, encountering aliens or monsters that could never
-          exist on Earth. On the other hand, you may wish to keep your game quite grounded, and
-          discover animals that could plausibly exist in the real world.</p>
-        <div className="label" style={{marginTop:'12px'}}>Level of realism (optional)</div>
-        <textarea className="field short" value={session.realism}
-          onChange={e => { const v = e.target.value; edit(s => { s.realism = v; }); }} />
-
-        <h2 style={{marginTop:'20px'}}>Safety &amp; comfort</h2>
-        <p>Exquisite Biome is a game that draws inspiration from nature and the natural world. If
-          there are topics or themes that you do not want to explore in your game, now is an
-          opportunity to address those. Lines are subjects that you don&rsquo;t want to include in your
-          game; veils are subjects that you might include, but agree not to discuss in vivid
-          detail. You can always update these lists throughout the game.</p>
-        <p>Potential lines and veils might include: snakes, spiders, insect infestations, cramped
-          or confined spaces, descriptions of violence or gore, animal mimicry.</p>
-        <div className="label" style={{marginTop:'12px'}}>Lines and veils (optional)</div>
-        <textarea className="field short" value={session.linesVeils}
-          onChange={e => { const v = e.target.value; edit(s => { s.linesVeils = v; }); }} />
-
-        <div className="entry-actions">
-          <button className="btn" onClick={() => setOverlay('home')}>Back</button>
-          <button className="btn primary" onClick={() => setScreen('biomeDraw')}>Continue</button>
-        </div>
-        <Chrome onHome={onHome} onHelp={help} />
       </div>
     );
   }
@@ -1364,16 +1323,6 @@ function App(){
         <button className="close-x" aria-label="Close" onClick={() => setScreen('archive')}>&#10005;</button>
         <h1>{rec.name}</h1>
         <p className="meta">{fmtDate(rec.createdAt)}</p>
-        {rec.realism &&
-          <div className="box" style={{marginTop:'12px'}}>
-            <div className="label">Level of realism</div>
-            <div className="body-text selectable">{rec.realism}</div>
-          </div>}
-        {rec.linesVeils &&
-          <div className="box">
-            <div className="label">Lines and veils</div>
-            <div className="body-text selectable">{rec.linesVeils}</div>
-          </div>}
 
         {rec.rounds.map((r, ri) =>
           <div key={ri}>
@@ -1440,18 +1389,10 @@ function App(){
   /* ---------- overlays ---------- */
   function Overlay(){
     if(overlay === 'help'){
-      const notes = session && (session.realism || session.linesVeils);
       return (
         <div className="overlay">
           <button className="close-x" aria-label="Close" onClick={() => setOverlay(null)}>&#10005;</button>
-          <div className="help-body selectable">
-            {notes ? [
-              session.realism    ? 'YOUR LEVEL OF REALISM\n' + session.realism + '\n\n' : '',
-              session.linesVeils ? 'YOUR LINES AND VEILS\n' + session.linesVeils + '\n\n' : '',
-              '—\n\n',
-            ].join('') : ''}
-            {ABOUT_TEXT}
-          </div>
+          <div className="help-body selectable">{ABOUT_TEXT}</div>
         </div>
       );
     }
@@ -1496,7 +1437,6 @@ function App(){
      their elements into App's own tree, where reconciliation works normally. */
   let body;
   switch(screen){
-    case 'setup':          body = Setup(); break;
     case 'biomeDraw':      body = BiomeDraw(); break;
     case 'biomeReveal':    body = BiomeReveal(); break;
     case 'biomeEntry':     body = BiomeEntry(); break;
