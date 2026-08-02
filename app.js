@@ -513,13 +513,14 @@ function newCreature(base, i) {
       frame: '',
       promptCard: null,
       body: ''
-    }
+    },
+    sketch: null // optional drawing of this creature
   };
 }
 function newRound(biome, base) {
   return {
     biome,
-    // { cards, body, name, inherited }
+    // { cards, body, name }
     base,
     // the three creature cards, in dealt order
     creatures: [newCreature(base, 0)],
@@ -527,7 +528,8 @@ function newRound(biome, base) {
     finalScene: {
       frame: '',
       promptCard: null,
-      body: ''
+      body: '',
+      sketch: null
     }
   };
 }
@@ -577,7 +579,10 @@ function expCard(ctx, x, y, card, draw) {
   }
   return W;
 }
-function paintExport(ctx, rec, sketchImg, measureOnly) {
+
+/* `imgs` maps a sketch data URL to its decoded Image (preloaded by
+   renderExport, since the two-pass layout can't await mid-paint). */
+function paintExport(ctx, rec, imgs, measureOnly) {
   const {
       W,
       PAD
@@ -612,15 +617,39 @@ function paintExport(ctx, rec, sketchImg, measureOnly) {
     if (draw) cards.forEach((c, i) => expCard(ctx, PAD + i * 70, y, c, true));
     y += 80 + 16;
   };
+  /* The sketch pad is portrait, so at full column width a drawing would run
+     ~1300px tall and a four-drawing journal would be mostly paper. Bound the
+     height and center it instead; aspect ratio is preserved either way. */
+  const SKETCH_MAX_H = 560;
+  const sketchBlock = src => {
+    const img = src ? imgs.get(src) : null;
+    if (!img) return;
+    y += 8;
+    let sw = CW,
+      sh = Math.round(CW * img.height / img.width);
+    if (sh > SKETCH_MAX_H) {
+      sw = Math.round(SKETCH_MAX_H * img.width / img.height);
+      sh = SKETCH_MAX_H;
+    }
+    const sx = PAD + Math.round((CW - sw) / 2);
+    if (draw) {
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, sx, y, sw, sh);
+      ctx.strokeStyle = EXP.ink;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(sx + 1, y + 1, sw - 2, sh - 2);
+    }
+    y += sh + 20;
+  };
   text(rec.name, 'bold 40px Arial, Helvetica, sans-serif', 8, 46);
   const speciesCount = rec.rounds.reduce((n, r) => n + r.creatures.filter(c => c.name).length, 0);
   text(`Exquisite Biome · ${fmtDate(rec.createdAt)} · ${speciesCount} species`, '20px Arial, Helvetica, sans-serif', 22, 26);
   line();
   y += 26;
-  rec.rounds.forEach((r, ri) => {
+  rec.rounds.forEach(r => {
     line();
     y += 26;
-    text(ri === 0 ? 'THE LAY OF THE LAND' : 'THE LAY OF THE LAND — CONTINUED', 'bold 16px Arial, Helvetica, sans-serif', 12, 20);
+    text('THE LAY OF THE LAND', 'bold 16px Arial, Helvetica, sans-serif', 12, 20);
     cardRow(r.biome.cards);
     biomePrompts(r.biome.cards).forEach(p => {
       text(p.label.toUpperCase(), 'bold 15px Arial, Helvetica, sans-serif', 2, 18);
@@ -644,6 +673,7 @@ function paintExport(ctx, rec, sketchImg, measureOnly) {
         if (cr.scene.promptCard) text(`Scene prompt: ${SCENE_RANK[cr.scene.promptCard.rank]}`, 'italic 20px Arial, Helvetica, sans-serif', 6, 28);
         text(cr.scene.body, '20px Arial, Helvetica, sans-serif', 18, 28);
       }
+      sketchBlock(cr.sketch);
     });
     if (r.finalScene.body || r.finalScene.frame) {
       line();
@@ -652,37 +682,50 @@ function paintExport(ctx, rec, sketchImg, measureOnly) {
       if (r.finalScene.frame) text(r.finalScene.frame, 'italic 20px Arial, Helvetica, sans-serif', 6, 28);
       if (r.finalScene.promptCard) text(`Scene prompt: ${SCENE_RANK[r.finalScene.promptCard.rank]}`, 'italic 20px Arial, Helvetica, sans-serif', 6, 28);
       text(r.finalScene.body, '20px Arial, Helvetica, sans-serif', 18, 28);
+      sketchBlock(r.finalScene.sketch);
     }
   });
-  if (sketchImg) {
+
+  // Journals saved before drawings moved into the flow carry one loose sketch.
+  if (rec.sketch) {
     line();
     y += 26;
-    const sh = Math.round(CW * sketchImg.height / sketchImg.width);
-    if (draw) {
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(sketchImg, PAD, y, CW, sh);
-      ctx.strokeStyle = EXP.ink;
-      ctx.lineWidth = 2;
-      ctx.strokeRect(PAD + 1, y + 1, CW - 2, sh - 2);
-    }
-    y += sh + 20;
+    sketchBlock(rec.sketch);
   }
   return y + PAD;
 }
+
+/* Every sketch a record carries, in one list, so they can be decoded up front. */
+function recordSketches(rec) {
+  const out = [];
+  (rec.rounds || []).forEach(r => {
+    r.creatures.forEach(c => {
+      if (c.sketch) out.push(c.sketch);
+    });
+    if (r.finalScene && r.finalScene.sketch) out.push(r.finalScene.sketch);
+  });
+  if (rec.sketch) out.push(rec.sketch);
+  return out;
+}
 async function renderExport(rec) {
-  const sketchImg = rec.sketch ? await new Promise(res => {
+  const srcs = recordSketches(rec);
+  const imgs = new Map();
+  await Promise.all(srcs.map(src => new Promise(res => {
     const img = new Image();
-    img.onload = () => res(img);
-    img.onerror = () => res(null);
-    img.src = rec.sketch;
-  }) : null;
+    img.onload = () => {
+      imgs.set(src, img);
+      res();
+    };
+    img.onerror = () => res();
+    img.src = src;
+  })));
   const measure = document.createElement('canvas');
   measure.width = measure.height = 1;
-  const H = Math.ceil(paintExport(measure.getContext('2d'), rec, sketchImg, true));
+  const H = Math.ceil(paintExport(measure.getContext('2d'), rec, imgs, true));
   const canvas = document.createElement('canvas');
   canvas.width = EXP.W;
   canvas.height = H;
-  paintExport(canvas.getContext('2d'), rec, sketchImg, false);
+  paintExport(canvas.getContext('2d'), rec, imgs, false);
   return canvas;
 }
 
@@ -812,8 +855,7 @@ function App() {
       s.rounds.push(newRound({
         cards,
         body: '',
-        name: '',
-        inherited: false
+        name: ''
       }, base));
     });
     setScreen('biomeReveal');
@@ -873,6 +915,8 @@ function App() {
       t.promptCard = cards[0];
     });
   }
+  // Every scene is followed by its drawing step; the drawing step decides
+  // where play goes next.
   function saveScene() {
     const target = sceneTarget;
     edit((s, r) => {
@@ -880,12 +924,7 @@ function App() {
       t.body = draft;
     });
     setDraft('');
-    if (target === 'final') {
-      setScreen('continue');
-      return;
-    }
-    // Third creature done -> the final coexistence scene; otherwise rotate.
-    if (round.creatureIndex >= 2) setScreen('finalIntro');else setScreen('rotate');
+    setScreen(target === 'final' ? 'finalSketch' : 'creatureSketch');
   }
   function advanceCreature() {
     edit((s, r) => {
@@ -895,51 +934,29 @@ function App() {
     setScreen('creatureRow');
   }
 
-  /* Continue play: a new biome, or new creatures in the one you're in. */
-  function continueNewBiome() {
-    edit(s => {
-      const [cards, deck] = drawCards(s.deck, 2);
-      const [base, deck2] = drawCards(deck, 3);
-      s.deck = deck2;
-      s.rounds.push(newRound({
-        cards,
-        body: '',
-        name: '',
-        inherited: false
-      }, base));
+  /* ---------- drawings ---------- */
+  // dataURL is null when skipped. After the third creature there's no
+  // rotation left — the row has come full circle — so play moves on.
+  function finishCreatureSketch(dataURL) {
+    const last = round.creatureIndex >= 2;
+    if (dataURL) edit((s, r) => {
+      r.creatures[r.creatureIndex].sketch = dataURL;
     });
-    setScreen('biomeReveal');
+    setScreen(last ? 'finalIntro' : 'rotate');
   }
-  function continueSameBiome() {
-    edit(s => {
-      const prev = s.rounds[s.rounds.length - 1];
-      const [base, deck] = drawCards(s.deck, 3);
-      s.deck = deck;
-      s.rounds.push(newRound({
-        ...JSON.parse(JSON.stringify(prev.biome)),
-        inherited: true
-      }, base));
-    });
-    setScreen('creatureRow');
-  }
-
-  /* ---------- finishing ---------- */
-  function finishSketch(dataURL) {
-    edit(s => {
-      s.sketch = dataURL;
-    });
+  // The coexistence drawing is the last act; publishing straight from here
+  // keeps the sketch out of the stale-session race that an edit() would lose.
+  function finishFinalSketch(dataURL) {
     publish(dataURL);
   }
-  function skipSketch() {
-    publish(null);
-  }
-  function publish(sketch) {
+  function publish(finalSketch) {
+    const rounds = JSON.parse(JSON.stringify(session.rounds));
+    if (finalSketch) rounds[rounds.length - 1].finalScene.sketch = finalSketch;
     const rec = {
       id: session.id,
       name: (session.rounds[0].biome.name || 'Unnamed biome').trim(),
       createdAt: session.createdAt,
-      rounds: session.rounds,
-      sketch: sketch || session.sketch || null
+      rounds
     };
     const next = [rec, ...archive];
     setArchive(next);
@@ -950,12 +967,6 @@ function App() {
     setRoleKey(null);
     setDraft('');
     setScreen('archive');
-  }
-  function burnSession() {
-    persistSession(null);
-    setSaved(null);
-    setOverlay(null);
-    goTitle();
   }
   function burnRecord(id) {
     const next = archive.filter(r => r.id !== id);
@@ -1245,7 +1256,7 @@ function App() {
       className: "box tight"
     }, /*#__PURE__*/React.createElement("div", {
       className: "label"
-    }, "Biome", round.biome.inherited ? ' (continued)' : ''), /*#__PURE__*/React.createElement("div", {
+    }, "Biome"), /*#__PURE__*/React.createElement("div", {
       className: "meta"
     }, round.biome.name ? round.biome.name + ' — ' : '', biomeSummary(round.biome.cards))), /*#__PURE__*/React.createElement("div", {
       className: "card-row",
@@ -1525,51 +1536,6 @@ function App() {
       onHelp: help
     }));
   }
-  function ContinueOrEnd() {
-    return /*#__PURE__*/React.createElement("div", {
-      className: "screen with-chrome"
-    }, /*#__PURE__*/React.createElement("div", {
-      className: "center"
-    }, /*#__PURE__*/React.createElement("h2", null, "Continue playing, or end the game?"), /*#__PURE__*/React.createElement("p", null, "If you decide to continue, use this chance to take a break if needed, then draw two new biome cards to explore a new environment \u2014 or three new creature cards, if you wish to stay in the same biome."), /*#__PURE__*/React.createElement("div", {
-      className: "btn-stack",
-      style: {
-        marginTop: '8px'
-      }
-    }, /*#__PURE__*/React.createElement("button", {
-      className: "btn",
-      onClick: continueNewBiome
-    }, "Draw a new biome"), /*#__PURE__*/React.createElement("button", {
-      className: "btn",
-      onClick: continueSameBiome
-    }, "New creatures, same biome"), /*#__PURE__*/React.createElement("button", {
-      className: "btn primary",
-      onClick: () => setScreen('ending')
-    }, "End the game"))), /*#__PURE__*/React.createElement(Chrome, {
-      onHome: onHome,
-      onHelp: help
-    }));
-  }
-  function Ending() {
-    return /*#__PURE__*/React.createElement("div", {
-      className: "screen with-chrome"
-    }, /*#__PURE__*/React.createElement("div", {
-      className: "center"
-    }, /*#__PURE__*/React.createElement("h2", null, "Ending the game"), /*#__PURE__*/React.createElement("p", null, "You might wrap up by noting a detail from this expedition that delighted or surprised you."), /*#__PURE__*/React.createElement("p", null, "What would you like to do with your journal?"), /*#__PURE__*/React.createElement("div", {
-      className: "btn-stack",
-      style: {
-        marginTop: '8px'
-      }
-    }, /*#__PURE__*/React.createElement("button", {
-      className: "btn primary",
-      onClick: () => setScreen('sketch')
-    }, "Keep it"), /*#__PURE__*/React.createElement("button", {
-      className: "btn",
-      onClick: () => setOverlay('burn')
-    }, "Burn it"))), /*#__PURE__*/React.createElement(Chrome, {
-      onHome: onHome,
-      onHelp: help
-    }));
-  }
   function Archive() {
     return /*#__PURE__*/React.createElement("div", {
       className: "screen with-chrome"
@@ -1638,7 +1604,7 @@ function App() {
       className: "divider"
     }), /*#__PURE__*/React.createElement("div", {
       className: "label"
-    }, "The lay of the land", r.biome.inherited ? ' (continued)' : ''), /*#__PURE__*/React.createElement("div", {
+    }, "The lay of the land"), /*#__PURE__*/React.createElement("div", {
       className: "card-row",
       style: {
         justifyContent: 'flex-start',
@@ -1697,7 +1663,11 @@ function App() {
       style: {
         marginTop: '8px'
       }
-    }, cr.scene.body)))), r.finalScene.body && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("hr", {
+    }, cr.scene.body)), cr.sketch && /*#__PURE__*/React.createElement("img", {
+      className: "sketch-img",
+      src: cr.sketch,
+      alt: 'Drawing of ' + cr.name
+    }))), r.finalScene.body && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("hr", {
       className: "divider"
     }), /*#__PURE__*/React.createElement("div", {
       className: "label"
@@ -1710,7 +1680,11 @@ function App() {
       style: {
         marginTop: '8px'
       }
-    }, r.finalScene.body)))), rec.sketch && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("hr", {
+    }, r.finalScene.body), r.finalScene.sketch && /*#__PURE__*/React.createElement("img", {
+      className: "sketch-img",
+      src: r.finalScene.sketch,
+      alt: "Drawing of the coexistence scene"
+    })))), rec.sketch && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("hr", {
       className: "divider"
     }), /*#__PURE__*/React.createElement("img", {
       className: "sketch-img",
@@ -1768,10 +1742,7 @@ function App() {
       setSaved(null);
       startNew();
     });
-    if (overlay === 'burn') {
-      const fromRecord = screen === 'record';
-      return box('Are you sure? This journal will be gone for good.', 'Yes, burn it', () => fromRecord ? burnRecord(viewId) : burnSession());
-    }
+    if (overlay === 'burn') return box('Are you sure? This journal will be gone for good.', 'Yes, burn it', () => burnRecord(viewId));
     if (overlay === 'goback') return box('Leave without saving? This entry will be lost.', 'Leave', () => {
       setOverlay(null);
       if (screen === 'creatureEntry') {
@@ -1827,16 +1798,20 @@ function App() {
     case 'finalIntro':
       body = FinalIntro();
       break;
-    case 'continue':
-      body = ContinueOrEnd();
-      break;
-    case 'ending':
-      body = Ending();
-      break;
-    case 'sketch':
+    case 'creatureSketch':
       body = /*#__PURE__*/React.createElement(SketchScreen, {
-        onAdd: finishSketch,
-        onSkip: skipSketch,
+        key: 'cs' + round.creatureIndex,
+        title: `Draw ${creature.name}?`,
+        onDone: finishCreatureSketch,
+        onHome: onHome,
+        onHelp: help
+      });
+      break;
+    case 'finalSketch':
+      body = /*#__PURE__*/React.createElement(SketchScreen, {
+        key: "fs",
+        title: "Draw the scene?",
+        onDone: finishFinalSketch,
         onHome: onHome,
         onHelp: help
       });
@@ -1863,8 +1838,8 @@ const SKETCH_PAPER = '#ffffff';
 const SKETCH_GRID = 96;
 const ERASER_CELLS = 7;
 function SketchScreen({
-  onAdd,
-  onSkip,
+  title,
+  onDone,
   onHome,
   onHelp
 }) {
@@ -1985,7 +1960,7 @@ function SketchScreen({
     className: "screen with-chrome"
   }, /*#__PURE__*/React.createElement("div", {
     className: "sketch-wrap"
-  }, /*#__PURE__*/React.createElement("h2", null, "Add a sketch to the journal?"), /*#__PURE__*/React.createElement("div", {
+  }, /*#__PURE__*/React.createElement("h2", null, title), /*#__PURE__*/React.createElement("div", {
     className: "sketch-paper"
   }, /*#__PURE__*/React.createElement("canvas", {
     ref: canvasRef,
@@ -2010,11 +1985,11 @@ function SketchScreen({
     className: "entry-actions"
   }, /*#__PURE__*/React.createElement("button", {
     className: "btn",
-    onClick: onSkip
+    onClick: () => onDone(null)
   }, "Skip"), /*#__PURE__*/React.createElement("button", {
     className: "btn primary",
     disabled: !dirty,
-    onClick: () => dirty && onAdd(canvasRef.current.toDataURL('image/png'))
+    onClick: () => dirty && onDone(canvasRef.current.toDataURL('image/png'))
   }, "Add")), /*#__PURE__*/React.createElement(Chrome, {
     onHome: onHome,
     onHelp: onHelp

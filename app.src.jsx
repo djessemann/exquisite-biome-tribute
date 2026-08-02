@@ -458,15 +458,16 @@ function newCreature(base, i){
     entries: { desc:'', feature:'', habits:'' },
     done:    { desc:false, feature:false, habits:false },
     scene:   { frame:'', promptCard:null, body:'' },
+    sketch:  null,               // optional drawing of this creature
   };
 }
 function newRound(biome, base){
   return {
-    biome,                       // { cards, body, name, inherited }
+    biome,                       // { cards, body, name }
     base,                        // the three creature cards, in dealt order
     creatures: [newCreature(base, 0)],
     creatureIndex: 0,
-    finalScene: { frame:'', promptCard:null, body:'' },
+    finalScene: { frame:'', promptCard:null, body:'', sketch:null },
   };
 }
 
@@ -506,7 +507,9 @@ function expCard(ctx, x, y, card, draw){
   return W;
 }
 
-function paintExport(ctx, rec, sketchImg, measureOnly){
+/* `imgs` maps a sketch data URL to its decoded Image (preloaded by
+   renderExport, since the two-pass layout can't await mid-paint). */
+function paintExport(ctx, rec, imgs, measureOnly){
   const { W, PAD } = EXP, CW = W - 2*PAD;
   const draw = !measureOnly;
   if(draw){ ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, ctx.canvas.height); }
@@ -528,6 +531,25 @@ function paintExport(ctx, rec, sketchImg, measureOnly){
     if(draw) cards.forEach((c, i) => expCard(ctx, PAD + i*70, y, c, true));
     y += 80 + 16;
   };
+  /* The sketch pad is portrait, so at full column width a drawing would run
+     ~1300px tall and a four-drawing journal would be mostly paper. Bound the
+     height and center it instead; aspect ratio is preserved either way. */
+  const SKETCH_MAX_H = 560;
+  const sketchBlock = (src) => {
+    const img = src ? imgs.get(src) : null;
+    if(!img) return;
+    y += 8;
+    let sw = CW, sh = Math.round(CW * img.height / img.width);
+    if(sh > SKETCH_MAX_H){ sw = Math.round(SKETCH_MAX_H * img.width / img.height); sh = SKETCH_MAX_H; }
+    const sx = PAD + Math.round((CW - sw) / 2);
+    if(draw){
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, sx, y, sw, sh);
+      ctx.strokeStyle = EXP.ink; ctx.lineWidth = 2;
+      ctx.strokeRect(sx + 1, y + 1, sw - 2, sh - 2);
+    }
+    y += sh + 20;
+  };
 
   text(rec.name, 'bold 40px Arial, Helvetica, sans-serif', 8, 46);
   const speciesCount = rec.rounds.reduce((n, r) => n + r.creatures.filter(c => c.name).length, 0);
@@ -536,10 +558,9 @@ function paintExport(ctx, rec, sketchImg, measureOnly){
   line();
   y += 26;
 
-  rec.rounds.forEach((r, ri) => {
+  rec.rounds.forEach((r) => {
     line(); y += 26;
-    text(ri === 0 ? 'THE LAY OF THE LAND' : 'THE LAY OF THE LAND — CONTINUED',
-         'bold 16px Arial, Helvetica, sans-serif', 12, 20);
+    text('THE LAY OF THE LAND', 'bold 16px Arial, Helvetica, sans-serif', 12, 20);
     cardRow(r.biome.cards);
     biomePrompts(r.biome.cards).forEach(p => {
       text(p.label.toUpperCase(), 'bold 15px Arial, Helvetica, sans-serif', 2, 18);
@@ -566,6 +587,7 @@ function paintExport(ctx, rec, sketchImg, measureOnly){
                'italic 20px Arial, Helvetica, sans-serif', 6, 28);
         text(cr.scene.body, '20px Arial, Helvetica, sans-serif', 18, 28);
       }
+      sketchBlock(cr.sketch);
     });
 
     if(r.finalScene.body || r.finalScene.frame){
@@ -576,36 +598,41 @@ function paintExport(ctx, rec, sketchImg, measureOnly){
         text(`Scene prompt: ${SCENE_RANK[r.finalScene.promptCard.rank]}`,
              'italic 20px Arial, Helvetica, sans-serif', 6, 28);
       text(r.finalScene.body, '20px Arial, Helvetica, sans-serif', 18, 28);
+      sketchBlock(r.finalScene.sketch);
     }
   });
 
-  if(sketchImg){
-    line(); y += 26;
-    const sh = Math.round(CW * sketchImg.height / sketchImg.width);
-    if(draw){
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(sketchImg, PAD, y, CW, sh);
-      ctx.strokeStyle = EXP.ink; ctx.lineWidth = 2;
-      ctx.strokeRect(PAD + 1, y + 1, CW - 2, sh - 2);
-    }
-    y += sh + 20;
-  }
+  // Journals saved before drawings moved into the flow carry one loose sketch.
+  if(rec.sketch){ line(); y += 26; sketchBlock(rec.sketch); }
   return y + PAD;
 }
 
+/* Every sketch a record carries, in one list, so they can be decoded up front. */
+function recordSketches(rec){
+  const out = [];
+  (rec.rounds || []).forEach(r => {
+    r.creatures.forEach(c => { if(c.sketch) out.push(c.sketch); });
+    if(r.finalScene && r.finalScene.sketch) out.push(r.finalScene.sketch);
+  });
+  if(rec.sketch) out.push(rec.sketch);
+  return out;
+}
+
 async function renderExport(rec){
-  const sketchImg = rec.sketch ? await new Promise(res => {
+  const srcs = recordSketches(rec);
+  const imgs = new Map();
+  await Promise.all(srcs.map(src => new Promise(res => {
     const img = new Image();
-    img.onload = () => res(img);
-    img.onerror = () => res(null);
-    img.src = rec.sketch;
-  }) : null;
+    img.onload = () => { imgs.set(src, img); res(); };
+    img.onerror = () => res();
+    img.src = src;
+  })));
   const measure = document.createElement('canvas');
   measure.width = measure.height = 1;
-  const H = Math.ceil(paintExport(measure.getContext('2d'), rec, sketchImg, true));
+  const H = Math.ceil(paintExport(measure.getContext('2d'), rec, imgs, true));
   const canvas = document.createElement('canvas');
   canvas.width = EXP.W; canvas.height = H;
-  paintExport(canvas.getContext('2d'), rec, sketchImg, false);
+  paintExport(canvas.getContext('2d'), rec, imgs, false);
   return canvas;
 }
 
@@ -709,7 +736,7 @@ function App(){
       const [cards, deck] = drawCards(s.deck, 2);
       const [base, deck2] = drawCards(deck, 3);
       s.deck = deck2;
-      s.rounds.push(newRound({ cards, body:'', name:'', inherited:false }, base));
+      s.rounds.push(newRound({ cards, body:'', name:'' }, base));
     });
     setScreen('biomeReveal');
   }
@@ -770,6 +797,8 @@ function App(){
       t.promptCard = cards[0];
     });
   }
+  // Every scene is followed by its drawing step; the drawing step decides
+  // where play goes next.
   function saveScene(){
     const target = sceneTarget;
     edit((s, r) => {
@@ -777,10 +806,7 @@ function App(){
       t.body = draft;
     });
     setDraft('');
-    if(target === 'final'){ setScreen('continue'); return; }
-    // Third creature done -> the final coexistence scene; otherwise rotate.
-    if(round.creatureIndex >= 2) setScreen('finalIntro');
-    else setScreen('rotate');
+    setScreen(target === 'final' ? 'finalSketch' : 'creatureSketch');
   }
   function advanceCreature(){
     edit((s, r) => {
@@ -790,37 +816,26 @@ function App(){
     setScreen('creatureRow');
   }
 
-  /* Continue play: a new biome, or new creatures in the one you're in. */
-  function continueNewBiome(){
-    edit(s => {
-      const [cards, deck] = drawCards(s.deck, 2);
-      const [base, deck2] = drawCards(deck, 3);
-      s.deck = deck2;
-      s.rounds.push(newRound({ cards, body:'', name:'', inherited:false }, base));
-    });
-    setScreen('biomeReveal');
+  /* ---------- drawings ---------- */
+  // dataURL is null when skipped. After the third creature there's no
+  // rotation left — the row has come full circle — so play moves on.
+  function finishCreatureSketch(dataURL){
+    const last = round.creatureIndex >= 2;
+    if(dataURL) edit((s, r) => { r.creatures[r.creatureIndex].sketch = dataURL; });
+    setScreen(last ? 'finalIntro' : 'rotate');
   }
-  function continueSameBiome(){
-    edit(s => {
-      const prev = s.rounds[s.rounds.length - 1];
-      const [base, deck] = drawCards(s.deck, 3);
-      s.deck = deck;
-      s.rounds.push(newRound({ ...JSON.parse(JSON.stringify(prev.biome)), inherited:true }, base));
-    });
-    setScreen('creatureRow');
-  }
+  // The coexistence drawing is the last act; publishing straight from here
+  // keeps the sketch out of the stale-session race that an edit() would lose.
+  function finishFinalSketch(dataURL){ publish(dataURL); }
 
-  /* ---------- finishing ---------- */
-  function finishSketch(dataURL){ edit(s => { s.sketch = dataURL; }); publish(dataURL); }
-  function skipSketch(){ publish(null); }
-
-  function publish(sketch){
+  function publish(finalSketch){
+    const rounds = JSON.parse(JSON.stringify(session.rounds));
+    if(finalSketch) rounds[rounds.length - 1].finalScene.sketch = finalSketch;
     const rec = {
       id: session.id,
       name: (session.rounds[0].biome.name || 'Unnamed biome').trim(),
       createdAt: session.createdAt,
-      rounds: session.rounds,
-      sketch: sketch || session.sketch || null,
+      rounds,
     };
     const next = [rec, ...archive];
     setArchive(next); saveArchive(next);
@@ -829,10 +844,6 @@ function App(){
     setScreen('archive');
   }
 
-  function burnSession(){
-    persistSession(null); setSaved(null);
-    setOverlay(null); goTitle();
-  }
   function burnRecord(id){
     const next = archive.filter(r => r.id !== id);
     setArchive(next); saveArchive(next);
@@ -1032,7 +1043,7 @@ function App(){
       <div className="screen with-chrome">
         <div className="step">Creature {n} of 3</div>
         <div className="box tight">
-          <div className="label">Biome{round.biome.inherited ? ' (continued)' : ''}</div>
+          <div className="label">Biome</div>
           <div className="meta">{round.biome.name ? round.biome.name + ' — ' : ''}{biomeSummary(round.biome.cards)}</div>
         </div>
         <div className="card-row" style={{margin:'16px 0'}}>
@@ -1233,43 +1244,6 @@ function App(){
     );
   }
 
-  function ContinueOrEnd(){
-    return (
-      <div className="screen with-chrome">
-        <div className="center">
-          <h2>Continue playing, or end the game?</h2>
-          <p>If you decide to continue, use this chance to take a break if needed, then draw two
-            new biome cards to explore a new environment &mdash; or three new creature cards, if you
-            wish to stay in the same biome.</p>
-          <div className="btn-stack" style={{marginTop:'8px'}}>
-            <button className="btn" onClick={continueNewBiome}>Draw a new biome</button>
-            <button className="btn" onClick={continueSameBiome}>New creatures, same biome</button>
-            <button className="btn primary" onClick={() => setScreen('ending')}>End the game</button>
-          </div>
-        </div>
-        <Chrome onHome={onHome} onHelp={help} />
-      </div>
-    );
-  }
-
-  function Ending(){
-    return (
-      <div className="screen with-chrome">
-        <div className="center">
-          <h2>Ending the game</h2>
-          <p>You might wrap up by noting a detail from this expedition that delighted or surprised
-            you.</p>
-          <p>What would you like to do with your journal?</p>
-          <div className="btn-stack" style={{marginTop:'8px'}}>
-            <button className="btn primary" onClick={() => setScreen('sketch')}>Keep it</button>
-            <button className="btn" onClick={() => setOverlay('burn')}>Burn it</button>
-          </div>
-        </div>
-        <Chrome onHome={onHome} onHelp={help} />
-      </div>
-    );
-  }
-
   function Archive(){
     return (
       <div className="screen with-chrome">
@@ -1321,7 +1295,7 @@ function App(){
         {rec.rounds.map((r, ri) =>
           <div key={ri}>
             <hr className="divider" />
-            <div className="label">The lay of the land{r.biome.inherited ? ' (continued)' : ''}</div>
+            <div className="label">The lay of the land</div>
             <div className="card-row" style={{justifyContent:'flex-start', margin:'8px 0'}}>
               {r.biome.cards.map((c, i) => <Card key={i} card={c} variant="sm" />)}
             </div>
@@ -1351,6 +1325,7 @@ function App(){
                       <div className="meta">Scene prompt: {SCENE_RANK[cr.scene.promptCard.rank]}</div>}
                     <p className="body-text selectable" style={{marginTop:'8px'}}>{cr.scene.body}</p>
                   </div>}
+                {cr.sketch && <img className="sketch-img" src={cr.sketch} alt={'Drawing of ' + cr.name} />}
               </div>
             )}
 
@@ -1362,10 +1337,13 @@ function App(){
                 {r.finalScene.promptCard &&
                   <div className="meta">Scene prompt: {SCENE_RANK[r.finalScene.promptCard.rank]}</div>}
                 <p className="body-text selectable" style={{marginTop:'8px'}}>{r.finalScene.body}</p>
+                {r.finalScene.sketch &&
+                  <img className="sketch-img" src={r.finalScene.sketch} alt="Drawing of the coexistence scene" />}
               </>}
           </div>
         )}
 
+        {/* Journals saved before drawings moved into the flow carry one loose sketch. */}
         {rec.sketch &&
           <>
             <hr className="divider" />
@@ -1407,11 +1385,9 @@ function App(){
     if(overlay === 'restart')
       return box('Start over? Your saved expedition will be lost.',
         'Start over', () => { setOverlay(null); persistSession(null); setSaved(null); startNew(); });
-    if(overlay === 'burn'){
-      const fromRecord = screen === 'record';
+    if(overlay === 'burn')
       return box('Are you sure? This journal will be gone for good.',
-        'Yes, burn it', () => fromRecord ? burnRecord(viewId) : burnSession());
-    }
+        'Yes, burn it', () => burnRecord(viewId));
     if(overlay === 'goback')
       return box('Leave without saving? This entry will be lost.',
         'Leave', () => {
@@ -1442,9 +1418,13 @@ function App(){
     case 'sceneEntry':     body = SceneEntry(); break;
     case 'rotate':         body = Rotate(); break;
     case 'finalIntro':     body = FinalIntro(); break;
-    case 'continue':       body = ContinueOrEnd(); break;
-    case 'ending':         body = Ending(); break;
-    case 'sketch':         body = <SketchScreen onAdd={finishSketch} onSkip={skipSketch}
+    case 'creatureSketch': body = <SketchScreen key={'cs' + round.creatureIndex}
+                                     title={`Draw ${creature.name}?`}
+                                     onDone={finishCreatureSketch}
+                                     onHome={onHome} onHelp={help} />; break;
+    case 'finalSketch':    body = <SketchScreen key="fs"
+                                     title="Draw the scene?"
+                                     onDone={finishFinalSketch}
                                      onHome={onHome} onHelp={help} />; break;
     case 'archive':        body = Archive(); break;
     case 'record':         body = Record(); break;
@@ -1462,7 +1442,7 @@ function App(){
 const SKETCH_PAPER = '#ffffff';
 const SKETCH_GRID = 96;
 const ERASER_CELLS = 7;
-function SketchScreen({ onAdd, onSkip, onHome, onHelp }){
+function SketchScreen({ title, onDone, onHome, onHelp }){
   const canvasRef = useRef(null);
   const ctxRef = useRef(null);
   const drawing = useRef(false);
@@ -1555,7 +1535,7 @@ function SketchScreen({ onAdd, onSkip, onHome, onHelp }){
   return (
     <div className="screen with-chrome">
       <div className="sketch-wrap">
-        <h2>Add a sketch to the journal?</h2>
+        <h2>{title}</h2>
         <div className="sketch-paper">
           <canvas ref={canvasRef}
             onPointerDown={down} onPointerMove={move} onPointerUp={up}
@@ -1568,9 +1548,9 @@ function SketchScreen({ onAdd, onSkip, onHome, onHelp }){
         </div>
       </div>
       <div className="entry-actions">
-        <button className="btn" onClick={onSkip}>Skip</button>
+        <button className="btn" onClick={() => onDone(null)}>Skip</button>
         <button className="btn primary" disabled={!dirty}
-          onClick={() => dirty && onAdd(canvasRef.current.toDataURL('image/png'))}>Add</button>
+          onClick={() => dirty && onDone(canvasRef.current.toDataURL('image/png'))}>Add</button>
       </div>
       <Chrome onHome={onHome} onHelp={onHelp} />
     </div>
